@@ -84,8 +84,7 @@ async function sendWhatsAppCatalog(to) {
                   { product_retailer_id: "ezg1lu6edm" },
                   { product_retailer_id: "tzz72lpzz2" },
                   { product_retailer_id: "esltl7pftq" },
-                  { product_retailer_id: "obdqyehm1w" },
-                  { product_retailer_id: "tikbl0qsl8" }
+                  { product_retailer_id: "obdqyehm1w" }
                 ]
               }
             ]
@@ -174,8 +173,7 @@ const getProductName =
     "ezg1lu6edm":"Himalayan Red Rajma 500gm" ,
     "tzz72lpzz2":"Himalayan Red Rajma 1kg" ,
     "esltl7pftq":"Wild Himalayan Tempering Spice" ,
-    "obdqyehm1w":"Himalayan Red Rice",
-    "tikbl0qsl8":"Test product" };
+    "obdqyehm1w":"Himalayan Red Rice"};
 
 const getProductWeight =
   { "43mypu8dye":120 ,
@@ -186,8 +184,7 @@ const getProductWeight =
     "ezg1lu6edm":500 ,
     "tzz72lpzz2":1000 ,
     "esltl7pftq":100 ,
-    "obdqyehm1w":1000,
-    "tikbl0qsl8":0 };
+    "obdqyehm1w":1000};
 
 // ---------------- NEW: send order_details (WhatsApp native payment) ----------------
 async function sendWhatsAppOrderDetails(to, session) {
