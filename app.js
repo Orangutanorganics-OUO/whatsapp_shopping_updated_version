@@ -2,9 +2,7 @@
 import 'dotenv/config';
 import express from 'express';
 import axios from 'axios';
-import crypto from 'crypto';
 import { google } from 'googleapis';
-import { v4 as uuidv4 } from 'uuid';
 import ShortUniqueId from 'short-unique-id';
 
 const app = express();
