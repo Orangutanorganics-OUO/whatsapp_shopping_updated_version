@@ -4,11 +4,16 @@ import express from 'express';
 import axios from 'axios';
 import { google } from 'googleapis';
 import ShortUniqueId from 'short-unique-id';
+import { extractTextFromPDF } from './components/pdf_reader.js'
+import { askGemini } from './components/gemini.js'
+// import { parseIntentBasedQA } from "./components/IntentQA.js"
 
 const app = express();
 
 // capture raw body for webhook signature verification if needed
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf } }));
+
+
 
 // --- ENV ---
 const {
@@ -19,18 +24,168 @@ const {
   PAYMENT_CONFIGURATION_NAME, // NEW - set this to the "name" you created in Meta (e.g. upi_test)
   FLOW_ID,
   DELHIVERY_TOKEN,
-  DELHIVERY_CHARGES_TOKEN,
   DELHIVERY_ORIGIN_PIN = '110042',
   DELHIVERY_CHARGES_URL = 'https://track.delhivery.com/api/kinko/v1/invoice/charges/.json',
   DELHIVERY_CREATE_URL = 'https://track.delhivery.com/api/cmu/create.json',
-  GOOGLE_SERVICE_ACCOUNT_EMAIL = "logeshe48@gmail.com",
-  GOOGLE_PRIVATE_KEY,
   SHEET_ID,
 
   // Optional: provider/BSP-based payment lookup (set this if your BSP provides a REST lookup)
   PAYMENTS_LOOKUP_BASE_URL,
   PAYMENTS_LOOKUP_API_KEY
 } = process.env;
+
+
+let pdfText = '';
+let intentBasedQA = new Map(); // Store Q&A with intents separately
+
+(async () => {
+  try {
+    pdfText = await extractTextFromPDF('./modified_questions.pdf');
+    console.log('PDF content loaded.');
+    
+    // Parse intent-based Q&A from PDF
+    parseIntentBasedQA(pdfText);
+    console.log('Intent-based Q&A parsed:', intentBasedQA.size);
+  } catch (err) {
+    console.error('Failed to load PDF:', err);
+  }
+})();
+
+function parseIntentBasedQA() {
+  intentBasedQA.clear();
+
+  // 1. Buy Now
+  intentBasedQA.set('buy now', {
+    answer: `Amazing choice! Here are our most loved products:\n1. Himalayan White Rajma – ₹347 / ₹691\n2. Himalayan Red Rajma – ₹347 / ₹691\n3. Badri Cow Ghee – from ₹450 Onwards.\n4. Himalayan Black Soyabean – ₹347 / ₹691\n5. Himalayan Red Rice & Herbs – from ₹347`,
+    intents: ['View Products']
+  });
+
+  // 2. Why People Love Us
+  intentBasedQA.set('why people love us', {
+    answer: `We're glad you're curious!💚\nHere’s why our community loves Orang Utan Organics 👇\nPick what you’d like to explore:`,
+    intents: ['Nutrition info', 'Recipes', 'Farmer Impact']
+  });
+
+  // 3. Sourcing Story
+  intentBasedQA.set('sourcing story', {
+    answer: `Every purchase helps a real Himalayan farmer.\n✅ Small landholder support\n✅ Gangotri Valley & high altitude-based collective\n✅ Traceable from farm to pack\nWant to see how your food travels from seed to shelf? Track Origin: https://orangutanorganics.net/`,
+    intents: ['View Products']
+  });
+
+  // 4. Recipes
+  intentBasedQA.set('recipes', {
+    answer: `Explore farm-fresh, nutritious recipes from our chef community:\n🥄 Red Rajma Curry with Tempering Spice\n🥄 Soyabean Stir-Fry\n🥄 Ghee-roasted Red Rice\nGet one sent to you now? View Recipe: https://orangutanorganics.net/recipes`,
+    intents: ['View Products']
+  });
+
+  // 5. Nutrition Info & Sourcing Story
+  intentBasedQA.set('nutrition info', {
+    answer: `Our products are:\n• 100% Himalayan grown & natural\n• NABL Lab-Tested for purity & nutrients\n• Rich in Iron, Fiber, and Antioxidants 🌾\nHere is Nutrition Info Table: https://orangutanorganics.net/nutrition`,
+    intents: ['Sourcing Story', 'View Products']
+  });
+
+  // 7. Farmer Impact
+  intentBasedQA.set('farmer impact', {
+    answer: `We directly reinvest in:\n• Soil conservation 🌍\n• Enhancing livelihoods via our farmers consortium 📘\n• Organic certifications for villages 🧾\nSee a video from our Himalayan base? Watch Now: https://orangutanorganics.net/`,
+    intents: ['View Products']
+  });
+
+  // 8. Our Story
+  intentBasedQA.set('our story', {
+    answer: `We’re not just a brand — we’re Forest People. Here’s what sets us apart.`,
+    intents: ['Where We’re From', 'Why It Matters', 'Trace Your Products']
+  });
+
+  // 9. Where We’re From
+  intentBasedQA.set('where we’re from', {
+    answer: `We’re rooted in Village Bhangeli, 2300m above sea level, in the Gangotri Valley 🏞\n🌱 Certified Organic Base\n📍 46 km from Uttarkashi, Uttarakhand\n💚 Home to just 40 small landholder families we support\nWould you like to see what life looks like up here? View Gallery: https://www.instagram.com/orangutan.organics/`,
+    intents: ['View Products']
+  });
+
+  // 10. Why It Matters
+  intentBasedQA.set('why it matters', {
+    answer: `We protect:\n• Native seeds & biodiversity\n• Water sources & soil health\n• Farmer dignity & livelihoods\nBuying from us = standing up for the planet & Himalayan farmers. Learn about our latest impact project? See Report: https://orangutanorganics.net/matters`,
+    intents: ['View Products']
+  });
+
+  // 11. Trace Your Products
+  intentBasedQA.set('trace your products', {
+    answer: `Every product is traceable🔁 From seed-to-shelf, you’ll know:\n• The exact farm\n• The harvest date\n• The batch testing results\nWant to trace your future order?\nSee how it works: https://orangutanorganics.net/traceability`,
+    intents: ['How It Works', 'View Products']
+  });
+
+  // 12. How It Works
+  intentBasedQA.set('how it works', {
+    answer: `We are tracing our products from our Himalayan farm to your plate with just a QR code, launching soon. We’ll notify you when it’s live!`,
+    intents: ['View Products']
+  });
+
+  // 14. Customer Reviews
+  intentBasedQA.set('customer reviews', {
+    answer: `Don’t just take our word for it 💬\nHere’s what conscious buyers like you are saying 👇\nWebsite and amazon review: https://orangutanorganics.net/reviews \nInstagram love: https://www.instagram.com/p/DOIOa4rkv5C/`,
+    intents: ['View Products']
+  });
+}
+
+
+export default { parseIntentBasedQA };
+
+async function sendWhatsAppInteractiveMessage(to, body, buttons) {
+  const formattedButtons = buttons.map((btn, index) => ({
+    type: 'reply',
+    reply: {
+      id: `btn_${index}_${btn.id}`,
+      title: btn.title
+    }
+  }));
+
+  return axios({
+    method: 'POST',
+    url: `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${ACCESS_TOKEN}`,
+    },
+    data: {
+      messaging_product: 'whatsapp',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: {
+          text: body
+        },
+        action: {
+          buttons: formattedButtons
+        }
+      }
+    },
+  });
+}
+
+function findIntentBasedResponse(userMessage) {
+  const normalizedMessage = userMessage.toLowerCase().trim();
+  
+  // Direct matches
+  if (intentBasedQA.has(normalizedMessage)) {
+    return intentBasedQA.get(normalizedMessage);
+  }
+  
+  // Partial matches for flexibility
+  for (let [key, value] of intentBasedQA.entries()) {
+    if (normalizedMessage.includes(key) || key.includes(normalizedMessage)) {
+      return value;
+    }
+  }
+  
+  // Check for trace-related keywords
+  if (normalizedMessage.includes('trace') || normalizedMessage.includes('track') || 
+      normalizedMessage.includes('origin') || normalizedMessage.includes('source')) {
+    return intentBasedQA.get('trace your products');
+  }
+  
+  return null;
+}
 
 if (!PAYMENT_CONFIGURATION_NAME) {
   console.warn('Warning: PAYMENT_CONFIGURATION_NAME not set. The order_details message requires the exact payment configuration name from Meta.');
@@ -132,10 +287,6 @@ async function sendWhatsAppFlow(to, flowId, flowToken = null) {
 let sheetsClient = null;
 function getSheetsClient() {
   if (sheetsClient) return sheetsClient;
-  if (!GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY) {
-    console.warn('Google service account credentials missing - sheet updates will be skipped.');
-    return null;
-  }
   const auth = new google.auth.GoogleAuth({
     // Note: this sample uses keyFile; if you prefer passing the key via env - change accordingly
     keyFile: "cred.json",
@@ -410,7 +561,7 @@ async function getDelhiveryCharges({ origin_pin = DELHIVERY_ORIGIN_PIN, dest_pin
       pt
     };
     const res = await axios.get(DELHIVERY_CHARGES_URL, {
-      headers: { Authorization: `Token ${DELHIVERY_CHARGES_TOKEN || DELHIVERY_TOKEN}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Token ${DELHIVERY_TOKEN}`, 'Content-Type': 'application/json' },
       params
     });
     return res.data;
@@ -741,16 +892,64 @@ app.post('/', async (req, res) => {
   } // end flow handler
 
   // normal message handlers (unchanged)
+   let replyText = '';
+  let useInteractiveMessage = false;
+  let buttons = [];
+  let isButtonReply = false;
   try {
-    if (/^(hi|hello)$/i.test(msgBody)) {
-      await sendWhatsAppText(from, "Namaste 🌱 Welcome to OrangUtan Organics! Type 'place order' to see our catalog.");
-    } else if (/place order/i.test(msgBody)) {
+    
+
+
+    if (msg.interactive && msg.interactive.button_reply) {
+    msgBody = msg.interactive.button_reply.title.toLowerCase().trim();
+    isButtonReply = true;
+  } else if (msg.text && msg.text.body) {
+    msgBody = msg.text.body.toLowerCase().trim();
+  }
+   
+
+  const intentResponse = findIntentBasedResponse(msgBody);
+  if (intentResponse) {
+    replyText = intentResponse.answer;
+    if (intentResponse.intents && intentResponse.intents.length > 0) {
+      useInteractiveMessage = true;
+      buttons = intentResponse.intents.map(intent => ({
+        id: intent.toLowerCase().replace(/\s+/g, '_'),
+        title: intent
+      }));
+    }
+  }
+
+
+    else if (msgBody === 'hi' || msgBody === 'hello' || msgBody === 'hey') {
+    replyText = `Namaste from OrangUtan Organics 🌱\nPerched at 2,300 mtr in the Gangotri Valley, we're here to share the true taste of the Himalayas. How can we brighten your day?`;
+    useInteractiveMessage = true;
+    buttons = [
+      { id: 'view_products', title: 'Buy now' },
+      { id: 'why_people_love_us', title: 'Why people love us' },
+      { id: 'customer_reviews', title: 'Our story' }
+    ];
+  } else if (/view products/i.test(msgBody)) {
       await sendWhatsAppCatalog(from);
-      if (!orderSessions[from]) orderSessions[from] = {};
-      orderSessions[from].productItems = orderSessions[from].productItems || [];
-      orderSessions[from].amount = orderSessions[from].amount || 0;
-      await sendWhatsAppText(from, "Please select items from our catalog.");
-    } else if (msg.type === "order" || msgBody === "order_received") {
+      
+  }
+  // PRIORITY 3: Handle other common responses
+  else if (msgBody.includes('how are you')) {
+    replyText = `We're flourishing like the alpine blooms at Gangotri! 😊 How can we assist you today?`;
+  } 
+  else if (msgBody === 'fine') {
+    replyText = `Glad to hear you're doing fine! At 2,300 m, our small-holder farmers nurture each seed with care. Would you like to learn about our traceability or geo-seed mapping?`;
+  } 
+  else if (msgBody.includes('thank you') || msgBody.includes('thanks')) {
+    replyText = `You're most welcome! Supporting Gangotri valley farmers means the world to us. Let us know if you'd like to know more about our ethical sourcing.`;
+  } 
+  else if (['awesome', 'amazing', 'great'].some(word => msgBody.includes(word))) {
+    replyText = `That's wonderful to hear! Just like our wild tempering spice—harvested ethically at altitude—your enthusiasm warms our hearts. 😊`;
+  }
+  // PRIORITY 4: Handle our story
+  else if (msgBody === 'our story') {
+    replyText = `🏔️ Our journey began in the pristine Gangotri Valley at 2,300 meters.\n\nWe work directly with small-holder farmers, ensuring fair trade and preserving traditional farming methods. Every product is geo-mapped and traceable - from seed to your table.\n\nOur mission: Authentic Himalayan products that support mountain communities.`;
+  } else if (msg.type === "order" || msgBody === "order_received") {
       const phoneKeySession = orderSessions[from] || {};
       phoneKeySession.catalogId = msg.order?.catalog_id;
       phoneKeySession.productItems = msg.order?.product_items || [];
@@ -768,10 +967,35 @@ app.post('/', async (req, res) => {
       await sendWhatsAppFlow(from, FLOW_ID);
       await sendWhatsAppText(from, "Please tap the button above and provide your delivery details.");
     } else {
-      await sendWhatsAppText(from, "Sorry, I didn’t understand that. Type *hi* to get started.");
+      try {
+      // Create a focused prompt that emphasizes intent-based responses
+      const focusedPrompt = `
+As OrangUtan Organics representative, answer this question warmly and briefly (max 50 words).
+If the question is about traceability, origin, sourcing, or "how it works" - suggest they ask about "Trace Your Products".
+
+Question: "${msgBody}"
+      `;
+      
+      const answer = await askGemini(focusedPrompt, pdfText);
+      replyText = answer || `At OrangUtan Organics, we stand against mislabelling and broken traceability. We empower local small‐holders, guarantee genuine Himalayan origin, and protect seeds via geo‐mapping. Feel free to ask about any of these!`;
+    } catch (err) {
+      console.error('AI response error:', err);
+      replyText = `Oops—something went awry! If you need assistance or want to learn about our farmers, traceability, or seed protection, just let me know.`;
+    }
     }
   } catch (err) {
     console.error("Handler error:", err.response?.data || err);
+  }
+  try {
+    if (useInteractiveMessage && buttons.length > 0) {
+      await sendWhatsAppInteractiveMessage(from, replyText, buttons);
+      console.log(`Sent interactive message to ${from} with ${buttons.length} buttons:`, buttons.map(b => b.title));
+    } else {
+      await sendWhatsAppText(from, replyText);
+      console.log(`Replied to ${from}: "${replyText.substring(0, 100)}..."`);
+    }
+  } catch (err) {
+    console.error('Error sending message:', err.response?.data || err.message);
   }
 
   res.sendStatus(200);
